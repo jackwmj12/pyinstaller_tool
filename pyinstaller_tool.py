@@ -164,17 +164,17 @@ class PyInstallerPackager(QMainWindow):
         self.extra_args.setPlaceholderText("输入额外的PyInstaller参数")
         other_layout.addWidget(self.extra_args)
 
-        # 数据文件列表
-        self.data_list = QListWidget()
-        self.data_list.setMinimumHeight(100)
-        form_layout.addWidget(QLabel("已添加数据文件:"))
-        form_layout.addWidget(self.data_list)
+        # # 数据文件列表
+        # self.data_list = QListWidget()
+        # self.data_list.setMinimumHeight(100)
+        # form_layout.addWidget(QLabel("已添加数据文件:"))
+        # form_layout.addWidget(self.data_list)
 
-        # 依赖项列表
-        self.hidden_list = QListWidget()
-        self.hidden_list.setMinimumHeight(100)
-        form_layout.addWidget(QLabel("已添加隐藏依赖:"))
-        form_layout.addWidget(self.hidden_list)
+        # # 依赖项列表
+        # self.hidden_list = QListWidget()
+        # self.hidden_list.setMinimumHeight(100)
+        # form_layout.addWidget(QLabel("已添加隐藏依赖:"))
+        # form_layout.addWidget(self.hidden_list)
 
         # 按钮区域
         button_layout = QHBoxLayout()
@@ -185,6 +185,14 @@ class PyInstallerPackager(QMainWindow):
         self.package_btn.clicked.connect(self.start_packaging)
         self.package_btn.setMinimumHeight(40)
         button_layout.addWidget(self.package_btn)
+
+        # 添加强制停止按钮
+        self.force_stop_btn = QPushButton("强制停止")
+        self.force_stop_btn.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+        self.force_stop_btn.clicked.connect(self.force_stop)
+        self.force_stop_btn.setMinimumHeight(40)
+        self.force_stop_btn.setEnabled(False)  # 初始不可用，当有进程运行时启用
+        button_layout.addWidget(self.force_stop_btn)
 
         self.clear_btn = QPushButton("清空设置")
         self.clear_btn.setStyleSheet("background-color: #f44336; color: white;")
@@ -200,6 +208,39 @@ class PyInstallerPackager(QMainWindow):
 
         # 状态栏
         self.statusBar().showMessage("就绪")
+
+        data_list_layout = QVBoxLayout()
+        form_layout.addLayout(data_list_layout)
+
+        data_list_layout.addWidget(QLabel("已添加数据文件:"))
+        data_list_widget = QWidget()
+        data_list_layout.addWidget(data_list_widget)
+        data_list_hbox = QHBoxLayout(data_list_widget)
+        self.data_list = QListWidget()
+        self.data_list.setMinimumHeight(100)
+        data_list_hbox.addWidget(self.data_list)
+        self.data_remove_btn = QPushButton("删除")
+        self.data_remove_btn.clicked.connect(lambda: self.remove_selected_item(self.data_list))
+        data_list_hbox.addWidget(self.data_remove_btn)
+
+        # 依赖项列表
+        hidden_list_layout = QVBoxLayout()
+        form_layout.addLayout(hidden_list_layout)
+
+        hidden_list_layout.addWidget(QLabel("已添加隐藏依赖:"))
+        hidden_list_widget = QWidget()
+        hidden_list_layout.addWidget(hidden_list_widget)
+        hidden_list_hbox = QHBoxLayout(hidden_list_widget)
+        self.hidden_list = QListWidget()
+        self.hidden_list.setMinimumHeight(100)
+        hidden_list_hbox.addWidget(self.hidden_list)
+        self.hidden_remove_btn = QPushButton("删除")
+        self.hidden_remove_btn.clicked.connect(lambda: self.remove_selected_item(self.hidden_list))
+        hidden_list_hbox.addWidget(self.hidden_remove_btn)
+
+        # 在 UI 中添加选项
+        self.include_python_check = QCheckBox("包含完整 Python 解释器")
+        form_layout.addWidget(self.include_python_check)
 
     def select_script(self):
         file_path, _ = QFileDialog.getOpenFileName(
@@ -306,6 +347,9 @@ class PyInstallerPackager(QMainWindow):
         # 添加图标
         icon_path = self.icon_path.text().strip()
         if icon_path and os.path.exists(icon_path):
+            # 处理包含空格的路径
+            if " " in icon_path:
+                icon_path = f'"{icon_path}"'
             cmd.extend(["--icon", icon_path])
 
         # 添加数据文件
@@ -317,6 +361,11 @@ class PyInstallerPackager(QMainWindow):
         for i in range(self.data_list.count()):
             module = self.hidden_list.item(i).text()
             cmd.extend(["--hidden-import", module])
+
+        # 在 build_command 中添加
+        if self.include_python_check.isChecked():
+            python_dir = os.path.dirname(sys.executable)
+            cmd.extend(['--add-data', f'{python_dir}{os.pathsep}python'])
 
         # 清理选项
         if self.clean_check.isChecked():
@@ -341,18 +390,64 @@ class PyInstallerPackager(QMainWindow):
         if not cmd:
             return
 
+        # 使用完整路径执行 PyInstaller
+        # 获取Python解释器路径，如果用户没有设置，则使用字符串"python"（希望系统PATH中有）
+        # 尝试查找系统 PyInstaller
+        python_interpreter = sys.executable
+        if not python_interpreter.endswith("python") and not python_interpreter.endswith("python3"):
+
+            pyinstaller_paths = [
+                os.path.join(os.path.dirname(sys.executable), "Scripts", "python.exe"),
+                os.path.join(os.path.dirname(sys.executable), "python.exe"),
+                r"C:\Python38\Scripts\pyinstaller.exe",  # 常见路径
+                r"C:\Program Files\Python38\Scripts\pyinstaller.exe"
+            ]
+
+            found = False
+            for path in pyinstaller_paths:
+                if os.path.exists(path):
+                    python_interpreter = path
+                    found = True
+                    break
+
+            if not found:
+                self.log_output.append("错误: 未找到 pyinstaller.exe")
+                self.log_output.append("请确保 PyInstaller 已安装")
+                return
+
+
+        cmd = [python_interpreter, "-m", "PyInstaller"] + cmd[1:]
+
         self.log_output.clear()
+        self.log_output.append(f"python_interpreter: {python_interpreter}")
         self.log_output.append("开始打包...")
         self.log_output.append(f"执行命令: {' '.join(cmd)}")
         self.statusBar().showMessage("打包中...")
+
         self.package_btn.setEnabled(False)
+        self.force_stop_btn.setEnabled(True)  # 启用强制停止按钮
 
         # 设置工作目录为脚本所在目录
         work_dir = os.path.dirname(self.script_path.text())
 
-        # 启动进程
-        self.process.setWorkingDirectory(work_dir)
-        self.process.start(cmd[0], cmd[1:])
+        try:
+            self.process.setWorkingDirectory(work_dir)
+            self.process.start(cmd[0], cmd[1:])
+            if not self.process.waitForStarted(5000):  # 5秒超时
+                self.log_output.append("进程启动超时！")
+                self.log_output.append(f"请检查 PyInstaller 是否安装: pip install pyinstaller")
+        except Exception as e:
+            self.log_output.append(f"启动进程失败: {str(e)}")
+            self.package_btn.setEnabled(True)
+
+    def force_stop(self):
+        """强制停止打包进程"""
+        if self.process.state() == QProcess.Running:
+            self.process.kill()  # 强制终止进程
+            self.log_output.append("已强制停止打包进程")
+            self.statusBar().showMessage("已强制停止")
+            self.package_btn.setEnabled(True)
+            self.force_stop_btn.setEnabled(False)
 
     def handle_stdout(self):
         data = self.process.readAllStandardOutput()
@@ -366,6 +461,7 @@ class PyInstallerPackager(QMainWindow):
 
     def packaging_finished(self, exit_code, exit_status):
         self.package_btn.setEnabled(True)
+        self.force_stop_btn.setEnabled(False)  # 禁用强制停止按钮
 
         if exit_code == 0:
             self.log_output.append("\n打包成功完成!")
@@ -380,6 +476,17 @@ class PyInstallerPackager(QMainWindow):
             self.statusBar().showMessage("打包失败")
             QMessageBox.critical(self, "打包失败", "打包过程中发生错误，请查看日志获取详细信息")
 
+    def remove_selected_item(self, list_widget):
+        selected = list_widget.currentRow()
+        if selected >= 0:
+            list_widget.takeItem(selected)
+
+    def select_python(self):
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择Python解释器", "", "Python解释器 (python.exe)"
+        )
+        if file_path:
+            self.python_path.setText(file_path)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
