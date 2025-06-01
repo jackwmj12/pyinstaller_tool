@@ -1,0 +1,9 @@
+
+*.pyz
+*.pkg
+*.toc
+*.pyc
+*.iml
+*.xml
+*.zip
+*.html
